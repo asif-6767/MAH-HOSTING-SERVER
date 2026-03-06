@@ -1,0 +1,218 @@
+//+------------------------------------------------------------------+
+//|                                     Quantum_Shanto_Ultimate_V8.mq5|
+//|                                  Developed by Shanto             |
+//|        Strategy: Smart Fractal Grid + Volatility Recovery        |
+//+------------------------------------------------------------------+
+#property copyright "Developed by Shanto"
+#property link      "https://www.mql5.com"
+#property version   "8.00"
+#property strict
+#property description "Professional Multi-Level Grid Strategy"
+
+//--- Input Parameters ---
+input group "🛡️ RISK MANAGEMENT"
+input double   InitialLot = 0.01;      // Starting Lot Size
+input double   LotMultiplier = 1.55;   // Quantum Martingale Factor
+input double   MaxDrawdownLimit = 20.0;// Max Equity Drawdown % (Kill Switch)
+input int      MaxGridLevels = 15;     // Maximum Grid Orders
+
+input group "🌀 QUANTUM CORE ENGINE"
+input int      MinGridDistance = 200;  // Base Distance between orders (Points)
+input double   DistanceMultiplier = 1.2;// Dynamic Step Expansion (Quantum Tech)
+input int      TargetProfitPoints = 250;// Basket Profit Goal (Points)
+
+input group "📡 SIGNAL FILTERS"
+input int      RSI_Period = 14;        // RSI Period for Trend Exhaustion
+input ENUM_TIMEFRAMES AnalysisTF = PERIOD_CURRENT; // Timeframe for analysis
+
+input group "🖥️ SYSTEM SETTINGS"
+input int      Magic = 888777;         // Unique Magic Number
+input int      Slippage = 30;          // Max Allowed Slippage
+
+//--- Global Variables ---
+double MinLot;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    // Get minimum allowed lot size for the broker
+    MinLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    Print("Quantum Shanto V8: System Armed and Ready.");
+    return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    // 1. Professional Security Check (Equity Protection)
+    if(IsEquityInDanger()) return;
+
+    int totalPos = CountMyPositions();
+
+    // 2. Smart Signal Entry (First Order)
+    if(totalPos == 0)
+    {
+        double rsiVal = GetRSI();
+        if(rsiVal < 25) ExecuteTrade(ORDER_TYPE_BUY, InitialLot, "Quantum Entry Buy");
+        else if(rsiVal > 75) ExecuteTrade(ORDER_TYPE_SELL, InitialLot, "Quantum Entry Sell");
+    }
+    else 
+    {
+        // 3. Advanced Grid Recovery (Adding Layers)
+        HandleRecoveryGrid();
+        
+        // 4. Smart Basket Profit Management (Closing All)
+        MonitorBasketProfit();
+    }
+}
+
+//--- Recovery Engine: Taking profit against the trend ---
+void HandleRecoveryGrid()
+{
+    ulong lastTicket = GetLastPositionTicket();
+    if(PositionSelectByTicket(lastTicket))
+    {
+        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        double currentPrice = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 
+                              SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        
+        int levels = CountMyPositions();
+        double distPoints = MathAbs(openPrice - currentPrice) / _Point;
+
+        // Quantum Dynamic Step: Distance increases as grid levels grow
+        double nextStep = MinGridDistance * MathPow(DistanceMultiplier, levels - 1);
+
+        if(distPoints >= nextStep && levels < MaxGridLevels)
+        {
+            // Confirmation: Price Action Reversal Check
+            if(IsReversalConfirmed((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)))
+            {
+                double nextLot = NormalizeDouble(PositionGetDouble(POSITION_VOLUME) * LotMultiplier, 2);
+                if(nextLot < MinLot) nextLot = MinLot;
+                ExecuteTrade((ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE), nextLot, "Grid Recovery");
+            }
+        }
+    }
+}
+
+//--- Price Action Reversal Filter ---
+bool IsReversalConfirmed(ENUM_POSITION_TYPE type)
+{
+    // For Buy: Current Close must be higher than previous Low (Bottom Reversal)
+    if(type == POSITION_TYPE_BUY) return (iClose(_Symbol, AnalysisTF, 0) > iLow(_Symbol, AnalysisTF, 1));
+    // For Sell: Current Close must be lower than previous High (Top Reversal)
+    if(type == POSITION_TYPE_SELL) return (iClose(_Symbol, AnalysisTF, 0) < iHigh(_Symbol, AnalysisTF, 1));
+    return false;
+}
+
+//--- Smart Basket Profit Management ---
+void MonitorBasketProfit()
+{
+    double totalProfit = 0;
+    double totalVolume = 0;
+
+    for(int i=PositionsTotal()-1; i>=0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(PositionSelectByTicket(ticket) && PositionGetInteger(POSITION_MAGIC) == Magic)
+        {
+            totalProfit += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+            totalVolume += PositionGetDouble(POSITION_VOLUME);
+        }
+    }
+
+    // Dynamic TP Calculation based on total exposure (Quantum Queen Tech)
+    double targetProfit = TargetProfitPoints * _Point * (totalVolume / InitialLot) * 10;
+
+    if(totalProfit >= targetProfit)
+    {
+        CloseAllPositions();
+        Print("Quantum Basket Target Reached: $", totalProfit);
+    }
+}
+
+//--- Execution Engine (Error Handling Included) ---
+bool ExecuteTrade(ENUM_ORDER_TYPE type, double lot, string comment)
+{
+    MqlTradeRequest request = {0};
+    MqlTradeResult result = {0};
+
+    request.action = TRADE_ACTION_DEAL;
+    request.symbol = _Symbol;
+    request.volume = lot;
+    request.type = type;
+    request.magic = Magic;
+    request.comment = comment;
+    request.deviation = Slippage;
+    request.price = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    
+    if(!OrderSend(request, result))
+    {
+        Print("Trade Error Code: ", GetLastError());
+        return false;
+    }
+    return true;
+}
+
+//--- Helper Functions ---
+double GetRSI() {
+    int handle = iRSI(_Symbol, AnalysisTF, RSI_Period, PRICE_CLOSE);
+    double buffer[]; ArraySetAsSeries(buffer, true);
+    if(CopyBuffer(handle, 0, 0, 1, buffer) < 1) return 50.0;
+    IndicatorRelease(handle);
+    return buffer[0];
+}
+
+int CountMyPositions() {
+    int count = 0;
+    for(int i=PositionsTotal()-1; i>=0; i--) {
+        if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == Magic) count++;
+    }
+    return count;
+}
+
+ulong GetLastPositionTicket() {
+    ulong lastTicket = 0; datetime lastTime = 0;
+    for(int i=0; i<PositionsTotal(); i++) {
+        ulong t = PositionGetTicket(i);
+        if(PositionSelectByTicket(t) && PositionGetInteger(POSITION_MAGIC) == Magic) {
+            if(PositionGetInteger(POSITION_TIME) > lastTime) {
+                lastTime = (datetime)PositionGetInteger(POSITION_TIME);
+                lastTicket = t;
+            }
+        }
+    }
+    return lastTicket;
+}
+
+bool IsEquityInDanger() {
+    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(eq < bal * (1.0 - MaxDrawdownLimit/100.0)) {
+        CloseAllPositions();
+        Print("CRITICAL PROTECTION: Max Drawdown Limit Reached.");
+        return true;
+    }
+    return false;
+}
+
+void CloseAllPositions() {
+    for(int i=PositionsTotal()-1; i>=0; i--) {
+        ulong t = PositionGetTicket(i);
+        if(PositionSelectByTicket(t) && PositionGetInteger(POSITION_MAGIC) == Magic) {
+            MqlTradeRequest req = {0}; MqlTradeResult res = {0};
+            req.action = TRADE_ACTION_DEAL;
+            req.position = t;
+            req.symbol = _Symbol;
+            req.volume = PositionGetDouble(POSITION_VOLUME);
+            req.type = (PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)?ORDER_TYPE_SELL:ORDER_TYPE_BUY;
+            req.price = (req.type==ORDER_TYPE_SELL)?SymbolInfoDouble(_Symbol, SYMBOL_BID):SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            req.deviation = Slippage;
+            OrderSend(req, res);
+        }
+    }
+}
